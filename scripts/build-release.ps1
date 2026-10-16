@@ -5,11 +5,11 @@ Set-Location -LiteralPath $projectRoot
 $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
 $files = @(
-  '.gitignore','package.json','README.md','LICENSE','CHANGELOG.md','SECURITY.md','THIRD_PARTY_NOTICES.md',
+  '.gitignore','package.json','README.md','LICENSE','CHANGELOG.md','SECURITY.md','SYNC_NOTES.md','THIRD_PARTY_NOTICES.md',
   'index.html','style.css','app.js','planner.js','catalog.js','catalog-ui.js','account-model.js','account-ui.js',
-  'server.mjs','account-client.mjs','account-controller.mjs','calculator-sync.mjs','record-verification.mjs',
+  'server.mjs','account-client.mjs','account-device.mjs','account-controller.mjs','calculator-sync.mjs','record-verification.mjs',
   'verify.html','verify.js','start.cmd','update-data.mjs',
-  'planner.test.mjs','server.test.mjs','catalog.test.mjs','account-model.test.mjs','record-verification.test.mjs','calculator-sync.test.mjs',
+  'planner.test.mjs','server.test.mjs','catalog.test.mjs','account-model.test.mjs','record-verification.test.mjs','calculator-sync.test.mjs','account-device.test.mjs','account-client.test.mjs',
   'data/catalog.json','data/GENSHIN-DB-LICENSE.txt','scripts/build-release.ps1',
   '.github/workflows/test.yml','.github/ISSUE_TEMPLATE/bug_report.md'
 )
