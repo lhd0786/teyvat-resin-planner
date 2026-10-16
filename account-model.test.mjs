@@ -5,6 +5,14 @@ import {readFileSync} from 'node:fs';
 import {validate,emptyTraveler} from './planner.js';
 const catalog=JSON.parse(readFileSync(new URL('./data/catalog.json',import.meta.url),'utf8'));
 const raw=()=>({syncedAt:'2026-10-15T14:00:00Z',role:{game_uid:'123456789',nickname:'旅人',region:'cn_gf01'},roles:[],errors:{}});
+test('同步统计只保留数量，额外凭据和非法统计不进入快照',()=>{
+ const d={strategy:'seelieex-adapted',gameApiRequests:7,reusedCalculatorDetails:2,cookie:'not-exported'},snapshot=normalizeAccount({...raw(),syncDiagnostics:d});
+ assert.deepEqual(snapshot.syncDiagnostics,{strategy:'seelieex-adapted',gameApiRequests:7,reusedCalculatorDetails:2});assert.ok(!JSON.stringify(snapshot).includes('not-exported'));
+ assert.equal(normalizeAccount({...raw(),syncDiagnostics:{...d,gameApiRequests:-1}}).syncDiagnostics,null);
+});
+test('实时树脂与聚宝盆待领宝钱同步到规划，不能当作钱包或浓缩数量',()=>{const snap=normalizeAccount({...raw(),notes:{current_resin:149,current_home_coin:460,max_home_coin:2400}}),s={profile:{uid:'123456789',resin:180,snapshot:'2026-10-15T13:00:00Z'},goals:[],economy:{coins:900,condensed:3}};const n=applyAccount(s,snap,catalog);assert.equal(n.profile.resin,149);assert.equal(n.economy.jar,460);assert.equal(n.economy.coinCap,2400);assert.equal(n.economy.coins,900);assert.equal(n.economy.condensed,3);assert.equal(n.economy.resourceTimes.jar,snap.notes.syncedAt);});
+test('旧便笺不覆盖较新的领取记录，主动资源刷新可用官方值校准树脂',()=>{const snap=normalizeAccount({...raw(),notes:{current_resin:149,current_home_coin:460}}),s={profile:{uid:'123456789',resin:20,snapshot:'2026-10-15T15:00:00Z'},goals:[],economy:{jar:0,resourceTimes:{jar:'2026-10-15T15:00:00Z'}}};const n=applyAccount(s,snap,catalog);assert.equal(n.profile.resin,20);assert.equal(n.economy.jar,0);const explicit=applyAccount(s,snap,catalog,{forceResources:true});assert.equal(explicit.profile.resin,149);assert.equal(explicit.economy.jar,460);});
+test('浓缩与钱包只接收明确库存，未覆盖保留原值，下限值不冒充余额',()=>{const s={profile:{uid:'123456789'},goals:[],economy:{condensed:3,coins:500}},snap=normalizeAccount({...raw(),inventory:{has_user_info:true,available_material:[{id:220007,name:'浓缩树脂',num:0},{id:204,name:'洞天宝钱',num:800}]}});const n=applyAccount(s,snap,catalog);assert.equal(n.economy.condensed,0);assert.equal(n.economy.coins,800);const absent=normalizeAccount({...raw(),inventory:{has_user_info:true,available_material:[]}});assert.equal(applyAccount(s,absent,catalog).economy.condensed,3);snap.inventory.items[0].minimum=true;assert.equal(applyAccount(s,snap,catalog).economy.condensed,3);});
 test('切换至未建目标的角色也进入定向读取范围，不遍历整个账号',()=>{
  const s={trainingRequests:[{kind:'characterLevel',itemKey:'varesa'}]};assert.deepEqual(requestedCharacterIds(s,catalog,'aino').sort(),[10000111,10000121]);assert.deepEqual(requestedCharacterIds(s,catalog,'varesa'),[10000111]);assert.equal(requestedCharacterIds(s,catalog,null).length,1);
 });

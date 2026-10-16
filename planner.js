@@ -128,6 +128,7 @@ export function normalizeEconomy(input={}){
   if(v!==null&&(!Number.isInteger(v)||v<0||v>max))fail('资源数量无效：'+key);e[key]=v;
  }
  for(const key of ['craft','shop'])e[key]=input[key]===true;
+ e.resourceTimes={};for(const key of ['condensed','cores','mora','coins','jar','coinCap','coinRate','trust'])if(Number.isFinite(Date.parse(input.resourceTimes?.[key])))e.resourceTimes[key]=new Date(input.resourceTimes[key]).toISOString();
  e.purchaseWeek=typeof input.purchaseWeek==='string'?input.purchaseWeek:'';e.purchases={};
  for(const item of POT_SHOP){const count=input.purchases?.[item.id]??0;if(!Number.isInteger(count)||count<0||count>item.limit)fail('洞天百宝已购数量无效');e.purchases[item.id]=count;}
  e.events=[];if(input.events!==undefined){if(!Array.isArray(input.events)||input.events.length>40)fail('活动奖励最多 40 项');const ids=new Set();for(const r of input.events){
@@ -179,7 +180,7 @@ export function plan(state,{now=Date.now(),horizon=7,recipes=[]}={}){
  if(alchemy.mora){const g=sim.goals.find(g=>g.material==='摩拉'&&g.status!=='unconfirmed');if(g)g.need+=alchemy.mora;else sim.goals.push({id:'alchemy-mora',name:'材料合成费用',material:'摩拉',need:alchemy.mora,owned:e.mora??0,stockKnown:e.mora!==null,location:'藏金之花',type:'leyline',yield:60000,priority:5,days:[0,1,2,3,4,5,6],status:'current',deadline:''});}
  for(let d=0;d<horizon;d++){
   const date=addDays(start,d),at=now+d*DAY,actions=[];
-  for(const g of sim.goals)if(g.status!=='unconfirmed'&&(g.stockKnown===false||g.type==='supply'&&g.owned<g.need))actions.push({kind:'advice',title:g.stockKnown===false?`核对 ${g.material} 库存，需求 ${g.need}；填入目标后启用排程`:`筹备 ${g.material}，尚缺 ${g.need-g.owned}：${g.location}（取得后更新库存）`});
+  if(d===0)for(const g of sim.goals)if(g.status!=='unconfirmed'&&(g.stockKnown===false||g.type==='supply'&&g.owned<g.need))actions.push({kind:'advice',preparation:true,title:g.stockKnown===false?`核对 ${g.material} 库存，需求 ${g.need}；填入目标后启用排程`:`提前筹备 ${g.material}，尚缺 ${g.need-g.owned}：${g.location}（取得后更新库存）`});
   const lost=d?Math.max(0,balance+180-200):0;if(d)balance=Math.min(200,balance+180);
   if(e.purchaseWeek!==weekKey(date)){e.purchaseWeek=weekKey(date);e.purchases=Object.fromEntries(POT_SHOP.map(p=>[p.id,0]));}
   if(d&&e.jar!==null)e.jar=Math.min(e.coinCap,e.jar+24*e.coinRate);
@@ -209,20 +210,31 @@ export function plan(state,{now=Date.now(),horizon=7,recipes=[]}={}){
   // Confirmed future rewards reserve the corresponding need until their claim day.
   for(const r of e.events)if(r.confirmed&&r.eligible&&!e.done.includes(r.id)&&r.date>date){const validGoals=candidate.goals.filter(g=>!g.deadline||r.date<=g.deadline);grant(validGoals,r.material,r.amount);}
   const day=basePlan(candidate,{now:at,horizon:1})[0];
-  for(const t of day.tasks){sim.goals.find(g=>g.id===t.id).owned+=t.expected;actions.push({kind:'fight',title:`挑战 ${t.location}（${t.cost} 原粹树脂）：${t.count-t.condensed*3} 次原粹领取${t.condensed?' + 浓缩树脂 ×'+t.condensed:''}，预计 ${Number(t.expected.toFixed(2))} ${t.material}`,task:t});if(t.material==='摩拉'&&e.mora!==null)e.mora+=t.expected;}
-  e.condensed=e.condensed===null?null:e.condensed-day.condensedUsed;balance=day.left;
+  let useCrafted=0;
+  function appendFight(t,prefix='挑战'){
+   const craftCount=e.craft&&e.condensed!==null&&e.cores!==null&&e.mora!==null&&['domain','leyline','artifact'].includes(t.type)?Math.max(0,Math.min(5-e.condensed,e.cores,Math.floor(e.mora/100),Math.floor(t.cost/60))):0;
+   if(craftCount){actions.push({kind:'craft',purpose:'use',title:`打本前合成浓缩树脂 ×${craftCount}：${craftCount*60} 原粹树脂 + ${craftCount} 晶核 + ${craftCount*100} 摩拉，本日使用`,count:craftCount});e.condensed+=craftCount;e.cores-=craftCount;e.mora-=craftCount*100;consume(sim.goals,'摩拉',craftCount*100);useCrafted+=craftCount;t.cost-=craftCount*60;t.condensed+=craftCount;}
+   sim.goals.find(g=>g.id===t.id).owned+=t.expected;actions.push({kind:'fight',title:`${prefix} ${t.location}（${t.cost} 原粹树脂）：${t.count-t.condensed*3} 次原粹领取${t.condensed?' + 浓缩树脂 ×'+t.condensed:''}，预计 ${Number(t.expected.toFixed(2))} ${t.material}`,task:t});if(t.material==='摩拉'&&e.mora!==null)e.mora+=t.expected;
+   if(e.condensed!==null)e.condensed-=t.condensed;
+  }
+  for(const t of day.tasks)appendFight(t);
+  balance=day.left;
   if(sim.profile.week!==weekKey(date)){sim.profile.week=weekKey(date);sim.profile.weeklyClaims=0;sim.profile.claimedBosses=[];}
   for(const t of day.tasks)if(t.type==='weekly'){sim.profile.weeklyClaims++;sim.profile.claimedBosses.push(t.location);}
   if(e.shop&&e.trust>=6&&!e.purchases.transient&&e.coins>=1200&&balance<=140&&sim.goals.some(g=>g.stockKnown!==false&&g.type!=='supply'&&g.status!=='unconfirmed'&&g.need>g.owned&&g.days.includes(weekday(date)))){
    actions.push({kind:'exchange',title:'打本后前往洞天百宝：1200 宝钱兑换须臾树脂 ×1，并立即使用（恢复 60）',shopId:'transient',count:1,coins:1200,material:'树脂',amount:60});e.coins-=1200;e.purchases.transient=1;balance+=60;
    sim.profile.resin=balance;const extraCandidate=structuredClone(sim);for(const a of craftQueue)for(const g of extraCandidate.goals)if(g.id==='training-material-'+a.outputId){g.stockKnown=true;g.owned+=a.count;}for(const r of e.events)if(r.confirmed&&r.eligible&&!e.done.includes(r.id)&&r.date>date)grant(extraCandidate.goals.filter(g=>!g.deadline||r.date<=g.deadline),r.material,r.amount);
-   const extra=basePlan(extraCandidate,{now:at,horizon:1})[0];for(const t of extra.tasks){sim.goals.find(g=>g.id===t.id).owned+=t.expected;actions.push({kind:'fight',title:`补充树脂后挑战 ${t.location}（${t.cost} 原粹树脂）：原粹领取 ${t.count-t.condensed*3} 份${t.condensed?' + 浓缩 ×'+t.condensed:''}，预计 ${Number(t.expected.toFixed(2))} ${t.material}`,task:t});if(t.material==='摩拉'&&e.mora!==null)e.mora+=t.expected;if(t.type==='weekly'){sim.profile.weeklyClaims++;sim.profile.claimedBosses.push(t.location);}}
-   day.tasks.push(...extra.tasks);day.spent+=extra.spent;day.condensedUsed+=extra.condensedUsed;if(e.condensed!==null)e.condensed-=extra.condensedUsed;balance=extra.left;day.budget+=60;
+   const extra=basePlan(extraCandidate,{now:at,horizon:1})[0];for(const t of extra.tasks){appendFight(t,'补充树脂后挑战');if(t.type==='weekly'){sim.profile.weeklyClaims++;sim.profile.claimedBosses.push(t.location);}}
+   day.tasks.push(...extra.tasks);day.spent+=extra.spent;day.condensedUsed+=extra.condensedUsed;balance=extra.left;day.budget+=60;
   }
+  // Crafts waiting only for Mora can be done immediately after today's ley lines.
+  while(craftQueue.length&&e.mora!==null&&e.mora>=craftQueue[0].mora){const action=craftQueue.shift();applyMaterialCraft(sim,action,recipes,{deductGoalsMora:false});actions.push(action);}
+  if(!craftQueue.length)for(let i=actions.length-1;i>=0;i--)if(actions[i].kind==='advice'&&actions[i].title.startsWith('待合成材料另需'))actions.splice(i,1);
   const craft=e.craft&&e.condensed!==null&&e.cores!==null&&e.mora!==null?Math.min(5-e.condensed,e.cores,Math.floor(e.mora/100),Math.floor(balance/60),Math.ceil(Math.max(0,balance+180-200)/60)):0;
   if(craft){actions.push({kind:'craft',title:`合成浓缩树脂 ×${craft}：${craft*60} 原粹树脂 + ${craft} 晶核 + ${craft*100} 摩拉，留待后续开放日`,count:craft});balance-=craft*60;e.condensed+=craft;e.cores-=craft;e.mora-=craft*100;consume(sim.goals,'摩拉',craft*100);}
-  if(!actions.some(a=>a.kind==='craft'))actions.push({kind:'advice',title:e.craft?'今日不合成浓缩树脂（无需储存、库存未知或材料不足）':'今日不合成浓缩树脂（储存策略未启用）'});
-  out.push({...day,date,budget:day.budget,spent:day.spent+craft*60,left:balance,lost,actions,alchemyMora:alchemy.mora,condensedLeft:e.condensed});
+  const reason=!e.craft?'浓缩合成策略未启用':[e.condensed,e.cores,e.mora].some(v=>v===null)?'浓缩树脂、晶核或摩拉库存未知':e.condensed>=5?'浓缩树脂已达持有上限':e.cores<1?'晶核不足':e.mora<100?'摩拉不足':balance<60?'剩余原粹不足60，今日打本无可浓缩的整组三份奖励':'无需储存，今日打本无可浓缩的整组三份奖励';
+  const resinCrafting={count:useCrafted+craft,useCount:useCrafted,storeCount:craft,reason:useCrafted+craft?'按本日打本和防溢出需要合成':reason};
+  out.push({...day,date,budget:day.budget,spent:day.spent+craft*60,left:balance,lost,actions,alchemyMora:alchemy.mora,condensedLeft:e.condensed,condensedUsed:day.condensedUsed+useCrafted,resinCrafting});
  }
  return out;
 }
@@ -247,5 +259,6 @@ export function completeAction(state,action,{now=Date.now(),actual,recipes=[]}={
   const shop=POT_SHOP.find(p=>p.id===action.shopId),n=action.count;if(!shop||e.coins===null||e.trust<shop.trust||e.coins<shop.price*n||e.purchases[shop.id]+n>shop.limit)throw new Error('宝钱、解锁条件或本周限购不足');if(shop.id==='transient'&&p.resin>140)throw new Error('请先消耗树脂，避免立即使用须臾树脂时溢出');
   e.coins-=shop.price*n;e.purchases[shop.id]+=n;if(shop.id==='transient')p.resin+=60;else{grant(next.goals,shop.material,shop.amount*n);if(shop.material==='摩拉'&&e.mora!==null)e.mora+=shop.amount*n;}
  }else throw new Error('此条为提示，无需记录完成');
+ for(const key of ['condensed','cores','mora','coins','jar'])if(e[key]!==normalizeEconomy(state.economy)[key])e.resourceTimes[key]=new Date(now).toISOString();
  next.goals=next.goals.filter(g=>g.id!=='alchemy-mora');return validate(next,{now});
 }

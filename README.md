@@ -1,12 +1,12 @@
 # 旅人手记 · 原神树脂与养成规划器
 
-**Teyvat Resin Planner v1.0.0** — Local Genshin Impact resin, character, talent, weapon and artifact progression planner.
+**Teyvat Resin Planner v1.1.0** — Local Genshin Impact resin, character, talent, weapon and artifact progression planner.
 
 将养成缺口转换成每天上号可执行的清单：打哪个秘境或地脉、是否合成浓缩树脂、炼金材料与洞天交易。面向国服，本机运行，支持手填、JSON 导入及米游社官方接口定向读取。
 
 ## 快速开始
 
-Windows x64 用户从 Releases 下载 `teyvat-resin-planner-1.0.0-windows-x64.zip`，解压至可写目录，双击 `start.cmd`。便携包包含 Node.js，无需安装 npm 依赖。首次服务窗口须保持运行，关闭即停止服务。
+Windows x64 用户从 [v1.1.0 发布页](https://github.com/lhd0786/teyvat-resin-planner/releases/tag/v1.1.0) 下载 `teyvat-resin-planner-1.1.0-windows-x64.zip`，解压至可写目录，双击 `start.cmd`。便携包包含 Node.js，无需安装 npm 依赖。首次服务窗口须保持运行，关闭即停止服务。下载后可用发布页的 `SHA256SUMS.txt` 核对 SHA-256。
 
 源码运行需 Node.js 22 或更新版本，在项目目录执行 `npm start`。访问 http://127.0.0.1:17840/ 。重复启动复用已有规划器，其他程序占用端口时会提示，不终止该进程。固定端口才能沿用同一浏览器中的规划数据。
 
@@ -35,9 +35,13 @@ Windows x64 用户从 Releases 下载 `teyvat-resin-planner-1.0.0-windows-x64.zi
 
 ## 同步范围与限制
 
-角色详情仅查询当前目标与所选角色，含节流、状态及重试。失败保留旧数据和原始时间，不将整个账号标为最新。未知值保留未知，不能按零预算。
+角色详情仅查询当前目标与所选角色。为减少人机验证，默认关闭自动更新；切换页面、选角色和回到窗口只显示已读资料，不主动请求官方接口。可选择每30分钟自动更新，遇到任何人机验证后自动关闭，需本人重新开启。手动点击的更新、同步与当前值读取入口仍会联网；连续请求串行处理，各自查询对应角色范围，不以本地快照或近期缓存冒充更新。失败保留旧值与原时间，并显示失败；手填表单的保存仍为本地编辑。未知值保留未知，不能按零预算。
 
 库存来自官方养成计算器本次查询涉及的材料，**不是完整背包**。缺口为零时可能只能证明下限（≥）。部分批次成功保留已读结果。战绩和计算器可能分别要求验证；风控、权限与接口变化会影响读取，可手填补充。
+
+同步逻辑已适配 [SeelieEx](https://github.com/KeyPJ/seelieEx) 的设备标识、计算器请求头和预取资料复用。设备 ID 保存在 `.private/device.json`，重启或重新登录沿用；官方返回的设备指纹只存内存，正常复用24小时，注册失败30分钟内不重复请求。设备注册采用上游固定兼容参数，不读取本机硬件。密码、Cookie 仍只存内存。同次更新的角色详情用于角色现状和库存计算，避免重复读取；库存每批最多30项，跨批同材料取最大可抵扣数量，不相加。遇验证立即停止该接口链，不递归拆批重试；下一次手动更新仍发起新的网络请求。账号页显示最近一次数据请求数量（不含登录与设备注册），便于核对。上述措施减少重复请求，不能保证免除官方验证。
+
+实现来源、请求流程、统计口径、验证记录及排查步骤见 [同步实现说明](SYNC_NOTES.md)。完整借鉴文件及许可声明见 [第三方声明](THIRD_PARTY_NOTICES.md)。
 
 活动奖励和未来情报不自动抓取；未确认目标暂停排程。随包数据库版本不等于当前服务器版本，规则以游戏公告为准。经验表覆盖1–90级，特殊条目缺失成本保留待核验；旅行者通用天赋表提示技能差异。元素宝石转换、溶媒转换、随机合成返还尚未自动规划。
 
@@ -51,7 +55,7 @@ Windows x64 用户从 Releases 下载 `teyvat-resin-planner-1.0.0-windows-x64.zi
 
 ## 数据与隐私
 
-规划保存在浏览器 localStorage，游戏快照位于 .private/account.json，可能含 UID、角色与库存。密码与 Cookie 仅存服务内存，停止后重新登录。应用不连接密码库、不读游戏内存。服务仅监听127.0.0.1，不要转发端口或公开部署。详情见 [SECURITY.md](SECURITY.md)。
+规划保存在浏览器 localStorage，游戏快照位于 .private/account.json，可能含 UID、角色与库存；.private/device.json 仅保存非凭据设备 ID。密码与 Cookie 仅存服务内存，停止后重新登录。应用不连接密码库、不读游戏内存。服务仅监听127.0.0.1，不要转发端口或公开部署。详情见 [SECURITY.md](SECURITY.md)。
 
 升级前从界面导出JSON。新版解压到新目录，若要迁移账号快照，请停止服务后自行迁移 .private/account.json；浏览器规划依赖原浏览器和端口。备份是个人数据，不要上传公开仓库。
 

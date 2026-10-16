@@ -61,7 +61,8 @@ export function normalizeAccount(raw){
  const notes=n?{syncedAt:at,source,resin:finite(n.current_resin),maxResin:finite(n.max_resin),resinRecoverySeconds:Number.isFinite(Number(n.resin_recovery_time))?Number(n.resin_recovery_time):null,homeCoin:finite(n.current_home_coin),maxHomeCoin:finite(n.max_home_coin),dailyCompleted:finite(n.finished_task_num),dailyTotal:finite(n.total_task_num),weeklyDiscountsRemaining:finite(n.remain_resin_discount_num),weeklyDiscountLimit:finite(n.resin_discount_num_limit),expeditions:Array.isArray(n.expeditions)?n.expeditions.map(e=>({status:label(e.status),remainingSeconds:Number(e.remained_time)||0})):null}:null;
  const hasInventory=raw.inventory?.has_user_info===true&&Array.isArray(raw.inventory.available_material);
  const inventory=hasInventory?{syncedAt:at,source:'米游社养成计算器',coverage:'本次养成计算可抵扣数量；≥表示仅确认下限，并非完整背包'+(raw.inventory.completedBatches<raw.inventory.totalBatches?'（部分批次成功）':''),items:raw.inventory.available_material.filter(m=>Number.isInteger(m.id)&&Number.isFinite(m.num)).map(m=>({id:m.id,name:label(m.name),count:m.num,minimum:m.minimum===true}))}:null;
- return {schemaVersion:1,checkedAt:at,role:{uid:String(role.game_uid??''),nickname:label(role.nickname),region:label(role.region),regionName:label(role.region_name),level:finite(Number(role.level))},roles:(raw.roles??[]).map(r=>({uid:String(r.game_uid),nickname:label(r.nickname),region:label(r.region),regionName:label(r.region_name)})),notes,characters,inventory,errors:raw.errors??{},verificationRequired:Object.values(raw.errors??{}).some(e=>[1034,10034,10035,5003,10041].includes(e.code))};
+ const d=raw.syncDiagnostics,syncDiagnostics=d?.strategy==='seelieex-adapted'&&Number.isInteger(d.gameApiRequests)&&d.gameApiRequests>=0&&Number.isInteger(d.reusedCalculatorDetails)&&d.reusedCalculatorDetails>=0?{strategy:'seelieex-adapted',gameApiRequests:d.gameApiRequests,reusedCalculatorDetails:d.reusedCalculatorDetails}:null;
+ return {schemaVersion:1,checkedAt:at,role:{uid:String(role.game_uid??''),nickname:label(role.nickname),region:label(role.region),regionName:label(role.region_name),level:finite(Number(role.level))},roles:(raw.roles??[]).map(r=>({uid:String(r.game_uid),nickname:label(r.nickname),region:label(r.region),regionName:label(r.region_name)})),notes,characters,inventory,syncDiagnostics,errors:raw.errors??{},verificationRequired:Object.values(raw.errors??{}).some(e=>[1034,10034,10035,5003,10041].includes(e.code))};
 }
 export function mergeAccount(previous,next){
  if(!previous||previous.role?.uid!==next.role.uid||previous.role?.region!==next.role.region)return next;
@@ -69,11 +70,17 @@ export function mergeAccount(previous,next){
  if(next.characters&&previous.characters){const rows=new Map(previous.characters.items.map(c=>[c.id,{...c,syncedAt:c.syncedAt??previous.characters.syncedAt}]));for(const c of next.characters.items){const old=rows.get(c.id);rows.set(c.id,{...old,...c,skillsSyncedAt:c.skillsSyncedAt??old?.skillsSyncedAt??old?.syncedAt,artifactsSyncedAt:c.artifactsSyncedAt??old?.artifactsSyncedAt??old?.syncedAt,weaponSyncedAt:c.weaponSyncedAt??old?.weaponSyncedAt??old?.syncedAt,weapon:c.weapon?{...c.weapon,refinement:c.weapon.refinement??old?.weapon?.refinement}:old?.weapon??null,skills:c.skills??old?.skills??null,artifacts:c.artifacts?.map(a=>({...a,setName:a.setName||(old?.artifacts?.find(p=>p.pos===a.pos&&p.name===a.name)?.setName??'')}))??old?.artifacts??null});}characters={...next.characters,items:[...rows.values()]};}
  return {...next,notes:next.notes??previous.notes,characters,inventory:next.inventory??previous.inventory};
 }
-export function applyAccount(state,snapshot,catalog){
+export function applyAccount(state,snapshot,catalog,{forceResources=false}={}){
  const next=structuredClone(state),sameAccount=!next.profile.uid||next.profile.uid===snapshot.role.uid;
  if(!sameAccount)throw new Error('同步账号与当前规划 UID 不同，请先切换规划账号，避免串号覆盖');
  if(Number.isInteger(snapshot.role.level)&&snapshot.role.level>=1&&snapshot.role.level<=60)next.profile.adventureRank=snapshot.role.level;next.profile.uid=snapshot.role.uid;next.profile.name=snapshot.role.nickname||next.profile.name;
- if(snapshot.notes?.resin!==null&&snapshot.notes?.resin!==undefined&&!(Date.parse(next.profile.snapshot)>Date.parse(snapshot.notes.syncedAt))){next.profile.resin=snapshot.notes.resin;next.profile.snapshot=snapshot.notes.syncedAt;}
+ const notes=snapshot.notes,notesAt=Date.parse(notes?.syncedAt);
+ if(Number.isInteger(notes?.resin)&&notes.resin>=0&&notes.resin<=200&&Number.isFinite(notesAt)&&(forceResources||!(Date.parse(next.profile.snapshot)>notesAt))){next.profile.resin=notes.resin;next.profile.snapshot=notes.syncedAt;}
+ next.economy??={};next.economy.resourceTimes??={};
+ function resource(key,value,at,max=1e9){if(Number.isInteger(value)&&value>=0&&value<=max&&Number.isFinite(Date.parse(at))&&(forceResources||!(Date.parse(next.economy.resourceTimes[key])>=Date.parse(at)))){next.economy[key]=value;next.economy.resourceTimes[key]=at;}}
+ // dailyNote reports the uncollected jar, not currency already in the wallet.
+ resource('jar',notes?.homeCoin,notes?.syncedAt,2400);
+ resource('coinCap',notes?.maxHomeCoin,notes?.syncedAt,2400);
  // Only exact material names are matched. Grade-equivalent or manually combined goals stay manual.
  const inventory=new Map((snapshot.inventory?.items??[]).map(m=>[m.id,m]));
  const freshInventory=snapshot.inventory&&!(Date.parse(next.materialInventory?.syncedAt)>=Date.parse(snapshot.inventory.syncedAt));
@@ -82,8 +89,8 @@ export function applyAccount(state,snapshot,catalog){
   const books=[...inventory.values()].filter(m=>[104001,104002,104003].includes(m.id));
   if(books.length)pools.set('角色经验',books.reduce((n,m)=>n+m.count*({104001:1000,104002:5000,104003:20000}[m.id]),0));
   for(const goal of [...next.goals].sort((a,b)=>b.priority-a.priority))if(pools.has(goal.material)){const amount=Math.min(goal.need??Infinity,pools.get(goal.material));goal.owned=amount;goal.stockKnown=true;pools.set(goal.material,pools.get(goal.material)-amount);}
-  next.economy??={};for(const [name,key]of [['摩拉','mora'],['晶核','cores'],['浓缩树脂','condensed']]){const item=[...inventory.values()].find(m=>(m.name||catalog?.materials?.[m.id]?.name)===name);if(item)next.economy[key]=item.count;}
  }
+ for(const [name,key,max]of [['摩拉','mora',1e9],['晶核','cores',1e9],['浓缩树脂','condensed',5],['洞天宝钱','coins',1e9]]){const item=[...inventory.values()].find(m=>(m.name||catalog?.materials?.[m.id]?.name)===name);if(item&&!item.minimum)resource(key,item.count,snapshot.inventory.syncedAt,max);}
  if(snapshot.characters){next.equippedWeapons=snapshot.characters.items.filter(c=>c.weapon?.id).map(c=>({...c.weapon,key:String(c.id)+'-'+String(c.weapon.id),holder:c.name,holderId:c.id,syncedAt:c.weaponSyncedAt??c.syncedAt??snapshot.characters.syncedAt}));}
  if(freshInventory){next.materialInventory={syncedAt:snapshot.inventory.syncedAt,items:snapshot.inventory.items.map(m=>({id:m.id,count:m.count,minimum:m.minimum===true}))};}
  let result=next;
