@@ -1,0 +1,13 @@
+.cache/
+.private/
+dist/
+runtime/
+node_modules/
+*.log
+.env
+.env.*
+*.kdbx
+*.key
+*.pem
+*.zip
+*.tgz
